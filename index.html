@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoreo Biomecánico IoT - UDP</title>
+    <!-- Hoja de estilos nativa (Sin dependencias de frameworks CSS externos) -->
+    <link rel="stylesheet" href="./css/styles.css">
+    <!-- Librería gráfica Chart.js (Requerimiento de visualización RF7 / RNF4) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+    <!-- ENCABEZADO Y NAVEGACIÓN PRINCIPAL -->
+    <header class="app-header">
+        <div class="brand-group">
+            <h1 class="brand-title">Sistema IoT de Monitoreo Biomecánico</h1>
+            <p class="brand-subtitle">Escuela de Informática y Telecomunicaciones - UDP</p>
+        </div>
+
+        <nav class="nav-tabs" aria-label="Navegación principal">
+            <button id="btnTabLive" class="nav-tab active" onclick="cambiarTab('tabLive')">Monitoreo en Vivo</button>
+            <button id="btnTabPostSerie" class="nav-tab" onclick="cambiarTab('tabPostSerie')">Análisis Post-Serie</button>
+            <button id="btnTabPacientes" class="nav-tab" onclick="cambiarTab('tabPacientes')">Gestión de Pacientes</button>
+            <button id="btnTabManual" class="nav-tab" onclick="cambiarTab('tabManual')">Manual de Uso</button>
+        </nav>
+
+        <div class="header-Status-actions">
+            <span class="connection-pill">
+                <span id="statusDot" class="status-dot dot-offline"></span>
+                <span id="statusText">Servidor Offline</span>
+            </span>
+            <button id="btnSimular" class="btn btn-indigo" onclick="toggleSimulacion()">
+                Activar Simulación
+            </button>
+        </div>
+    </header>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <main class="main-container">
+
+        <!-- =================================================================
+             VISTA 1: MONITOREO EN VIVO (RF3, RF4, RF5, RF6)
+             ================================================================= -->
+        <div id="tabLive" class="tab-view">
+            <div class="live-grid">
+                
+                <!-- Columna Izquierda: Configuración y Selección Biomecánica -->
+                <section class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Parámetros del Ejercicio</h2>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="selectPacienteLive" class="form-label">Paciente Seleccionado</label>
+                        <select id="selectPacienteLive" class="form-control">
+                            <option value="1">Juan Fuentes</option>
+                            <option value="2">Benjamín Carrasco</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="selectEjercicioLive" class="form-label">Ejercicio</label>
+                        <select id="selectEjercicioLive" class="form-control">
+                            <option value="sentadilla">Sentadilla Libre / Asistida</option>
+                            <option value="curl_biceps">Curl de Bíceps</option>
+                        </select>
+                    </div>
+
+                    <!-- Acotación Biomecánica por Ejes (Sección 12.1 del Informe) -->
+                    <div class="metric-highlight-box">
+                        <label for="selectMetricaBiomecanica" class="form-label label-indigo">Métrica Biomecánica a Monitorear</label>
+                        <select id="selectMetricaBiomecanica" class="form-control control-indigo" onchange="actualizarMetricaSeleccionada()">
+                            <option value="profundidad">Profundidad / Flexión (Rodilla/Cadera)</option>
+                            <option value="valgo">Valgo de Rodilla (Plano Frontal)</option>
+                            <option value="tronco">Inclinación de Tronco (Vertical)</option>
+                        </select>
+                        <span id="descMetrica" class="metric-helper-text">
+                            Evalúa el ángulo de flexión articular durante la fase excéntrica y concéntrica.
+                        </span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="inputTolerancia" class="form-label">Tolerancia Angular Configurable (&plusmn;&deg;)</label>
+                        <div class="range-row">
+                            <input type="range" id="inputTolerancia" min="5" max="25" value="10" oninput="actualizarEtiquetaTolerancia(this.value)">
+                            <span id="lblTol" class="range-value">10°</span>
+                        </div>
+                    </div>
+
+                    <div class="card-actions-vertical">
+                        <button class="btn btn-emerald btn-block" onclick="ejecutarZeroing()">
+                            Calibrar Sensores (Zeroing 2s)
+                        </button>
+                        <button id="btnGrabarPatron" class="btn btn-secondary btn-block" onclick="grabarPatron()">
+                            Grabar Repetición Patrón
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Columna Derecha: Telemetría y Alerta Inmediata -->
+                <section class="card card-telemetry">
+                    <div class="card-header header-flex">
+                        <div>
+                            <h2 class="card-title">Telemetría Angular en Tiempo Real</h2>
+                            <span id="labelMetricaActiva" class="subtitle-indigo">Modo: Profundidad / Flexión</span>
+                        </div>
+                        <div class="chart-legend">
+                            <span class="legend-item"><span class="legend-dot bg-emerald"></span> Ángulo Medido</span>
+                            <span class="legend-item"><span class="legend-dot bg-slate"></span> Patrón Referencia</span>
+                        </div>
+                    </div>
+
+                    <div class="chart-wrapper-live">
+                        <canvas id="telemetryChart"></canvas>
+                    </div>
+
+                    <div id="alertBanner" class="alert-banner alert-ok">
+                        <div class="alert-info">
+                            <div id="alertIcon" class="alert-indicator indicator-ok"></div>
+                            <div>
+                                <p id="alertTitle" class="alert-title">Postura Correcta</p>
+                                <p id="alertSub" class="alert-subtitle">Desviación dentro del margen permitido.</p>
+                            </div>
+                        </div>
+                        <div class="alert-readout">
+                            <span id="txtAnguloActual" class="angle-value value-ok">0.0°</span>
+                            <span id="txtLabelUnidad" class="angle-unit">ÁNGULO ARTICULAR</span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Historial de Alertas y Eventos en Vivo -->
+            <section class="card">
+                <div class="card-header header-flex">
+                    <div class="title-with-badge">
+                        <h2 class="card-title-sm">Historial de Alertas &amp; Eventos en Vivo</h2>
+                        <span id="badgeAlertCount" class="badge badge-neutral">0 Registros</span>
+                    </div>
+                    <button class="btn-link" onclick="limpiarLogAlertas()">Limpiar Historial</button>
+                </div>
+
+                <div id="logAlertasContainer" class="log-container">
+                    <div id="logPlaceholder" class="log-placeholder">
+                        Sin alertas detectadas. Active la simulación o conecte el servidor para registrar desviaciones biomecánicas en tiempo real.
+                    </div>
+                </div>
+            </section>
+
+            <!-- Panel de Monitoreo Multinodo y Red (RF3, RNF2, RNF5, RNF6) -->
+            <section class="card">
+                <div class="card-header header-flex">
+                    <div>
+                        <h2 class="card-title-sm">Estado de Red Local &amp; Nodos IoT (RF3 / RNF6)</h2>
+                        <p class="card-subtitle">Monitoreo en tiempo real a 100 Hz vía UDP sobre WLAN privada</p>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" onclick="simularDesconexionNodo()">
+                        Simular Desconexión (RNF6)
+                    </button>
+                </div>
+
+                <div class="nodes-grid">
+                    <div id="nodoCard1" class="node-card">
+                        <div class="node-header">
+                            <div>
+                                <span class="node-title">Nodo 1: Muslo</span>
+                                <span class="node-meta">ESP32-C3 | Segmento Proximal</span>
+                            </div>
+                            <span id="nodoBadge1" class="badge badge-online">ONLINE</span>
+                        </div>
+                        <div class="node-stats">
+                            <div class="stat-row"><span>Batería:</span> <strong>3.95 V (90%)</strong></div>
+                            <div class="stat-row"><span>Pérdida UDP:</span> <strong class="text-emerald">0.8%</strong></div>
+                            <div class="stat-row"><span>Latencia:</span> <strong>110 ms</strong></div>
+                        </div>
+                    </div>
+
+                    <div id="nodoCard2" class="node-card">
+                        <div class="node-header">
+                            <div>
+                                <span class="node-title">Nodo 2: Tibia</span>
+                                <span class="node-meta">ESP32-C3 | Segmento Distal</span>
+                            </div>
+                            <span id="nodoBadge2" class="badge badge-online">ONLINE</span>
+                        </div>
+                        <div class="node-stats">
+                            <div class="stat-row"><span>Batería:</span> <strong>3.88 V (84%)</strong></div>
+                            <div class="stat-row"><span>Pérdida UDP:</span> <strong id="nodoLoss2" class="text-emerald">1.1%</strong></div>
+                            <div class="stat-row"><span>Latencia:</span> <strong>115 ms</strong></div>
+                        </div>
+                    </div>
+
+                    <div id="nodoCard3" class="node-card">
+                        <div class="node-header">
+                            <div>
+                                <span class="node-title">Nodo 3: Tronco</span>
+                                <span class="node-meta">ESP32-C3 | Torso</span>
+                            </div>
+                            <span id="nodoBadge3" class="badge badge-online">ONLINE</span>
+                        </div>
+                        <div class="node-stats">
+                            <div class="stat-row"><span>Batería:</span> <strong>3.91 V (87%)</strong></div>
+                            <div class="stat-row"><span>Pérdida UDP:</span> <strong class="text-emerald">0.5%</strong></div>
+                            <div class="stat-row"><span>Latencia:</span> <strong>105 ms</strong></div>
+                        </div>
+                    </div>
+
+                    <div id="nodoCard4" class="node-card">
+                        <div class="node-header">
+                            <div>
+                                <span class="node-title">Nodo 4: Cadera</span>
+                                <span class="node-meta">ESP32-C3 | Pelvis</span>
+                            </div>
+                            <span id="nodoBadge4" class="badge badge-online">ONLINE</span>
+                        </div>
+                        <div class="node-stats">
+                            <div class="stat-row"><span>Batería:</span> <strong>3.82 V (79%)</strong></div>
+                            <div class="stat-row"><span>Pérdida UDP:</span> <strong class="text-emerald">1.3%</strong></div>
+                            <div class="stat-row"><span>Latencia:</span> <strong>118 ms</strong></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="reconexionNotice" class="reconnect-banner hidden">
+                    <div class="reconnect-info">
+                        <span class="status-dot dot-warning-ping"></span>
+                        <span><strong>Notificación RNF6:</strong> Nodo 2 desconectado por timeout de paquetes (&gt; 1 s). Servidor esperando reconexión automática...</span>
+                    </div>
+                    <button class="btn-link text-amber" onclick="restaurarNodo()">Simular Reconexión</button>
+                </div>
+            </section>
+        </div>
+
+        <!-- =================================================================
+             VISTA 2: ANÁLISIS POST-SERIE (RF6, RF7, EXPORTACIÓN)
+             ================================================================= -->
+        <div id="tabPostSerie" class="tab-view hidden">
+            <section class="card">
+                <div class="card-header header-flex">
+                    <div>
+                        <h2 class="card-title">Análisis Clínico Post-Serie</h2>
+                        <p class="card-subtitle">Paciente: <strong class="text-emerald">Juan Fuentes</strong> | Ejercicio: Sentadilla Libre | Fecha: 30 Oct 2026</p>
+                    </div>
+                    <div class="button-group">
+                        <button class="btn btn-secondary btn-sm" onclick="exportarCSV()">
+                            Exportar CSV
+                        </button>
+                        <button class="btn btn-emerald btn-sm" onclick="abrirModalReporte()">
+                            Ficha Clínica PDF / Imprimir
+                        </button>
+                    </div>
+                </div>
+
+                <div class="reps-grid">
+                    <div class="rep-card">
+                        <div class="rep-header"><span>Repetición 1</span><span class="text-emerald">TÉCNICA OK</span></div>
+                        <p class="rep-time text-emerald">2.5 s</p>
+                        <p class="rep-dev">Desviación máx: 3.2°</p>
+                    </div>
+                    <div class="rep-card">
+                        <div class="rep-header"><span>Repetición 2</span><span class="text-emerald">TÉCNICA OK</span></div>
+                        <p class="rep-time text-emerald">2.8 s</p>
+                        <p class="rep-dev">Desviación máx: 4.1°</p>
+                    </div>
+                    <div class="rep-card">
+                        <div class="rep-header"><span>Repetición 3</span><span class="text-emerald">TÉCNICA OK</span></div>
+                        <p class="rep-time text-emerald">3.4 s</p>
+                        <p class="rep-dev">Desviación máx: 6.8°</p>
+                    </div>
+                    <div class="rep-card rep-card-fail">
+                        <div class="rep-header text-red"><span>Repetición 4</span><strong>FALLA BIOMECÁNICA</strong></div>
+                        <p class="rep-time text-red">4.2 s</p>
+                        <p class="rep-dev text-red-light">Desviación máx: 14.8° (Superó tol.)</p>
+                    </div>
+                </div>
+
+                <div class="tut-panel">
+                    <div class="card-header header-flex">
+                        <div>
+                            <h3 class="card-title-sm">Evolución del Tiempo Bajo Tensión (TUT) e Índice de Fatiga</h3>
+                            <p class="card-subtitle">Cuantificación del alargamiento del tiempo por repetición como indicador biomecánico de fatiga</p>
+                        </div>
+                        <span class="badge badge-amber">
+                            Índice de Fatiga: <strong>+68% Duración</strong>
+                        </span>
+                    </div>
+
+                    <div class="chart-wrapper-tut">
+                        <canvas id="tutChart"></canvas>
+                    </div>
+
+                    <div class="kpi-grid">
+                        <div class="kpi-box">
+                            <span class="kpi-label">TUT TOTAL ACUMULADO</span>
+                            <span class="kpi-value">12.9 segundos</span>
+                        </div>
+                        <div class="kpi-box">
+                            <span class="kpi-label">DURACIÓN PROMEDIO / REP</span>
+                            <span class="kpi-value text-indigo">3.22 segundos</span>
+                        </div>
+                        <div class="kpi-box">
+                            <span class="kpi-label">EFICIENCIA DE REHABILITACIÓN</span>
+                            <span class="kpi-value text-emerald">75% (3/4 Reps Validadas)</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- =================================================================
+             VISTA 3: GESTIÓN DE PACIENTES Y PATRONES (RF4, RF8)
+             ================================================================= -->
+        <div id="tabPacientes" class="tab-view hidden">
+            <section class="card header-flex">
+                <div>
+                    <h2 class="card-title">Registro de Pacientes y Patrones de Movimiento</h2>
+                    <p class="card-subtitle">Persistencia en PostgreSQL de usuarios, tolerancias y curvas de referencia (RF8)</p>
+                </div>
+                <button class="btn btn-emerald btn-sm" onclick="abrirModalPaciente()">+ Agregar Paciente</button>
+            </section>
+
+            <section class="card table-card">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>RUT</th>
+                            <th>Nombre / Datos</th>
+                            <th>Ejercicio Asignado</th>
+                            <th>Patrón Grabado (RF4)</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaPacientesBody">
+                        <tr>
+                            <td>19.876.543-2</td>
+                            <td>
+                                <strong>Juan Fuentes</strong>
+                                <span class="table-subtext">28 años | Masculino | juan.fuentes@udp.cl</span>
+                            </td>
+                            <td>Sentadilla Libre</td>
+                            <td><span class="badge badge-online">Registrado (&plusmn;10°)</span></td>
+                            <td class="table-actions">
+                                <button class="btn-link text-emerald" onclick="verPatronPaciente('Juan Fuentes', 'Sentadilla Libre', 10)">Ver Patrón</button>
+                                <button class="btn-link text-indigo" onclick="consultarHistorialPaciente('19.876.543-2')">Historial</button>
+                                <button class="btn-link text-red" onclick="eliminarFila(this)">Eliminar</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>18.234.567-1</td>
+                            <td>
+                                <strong>Benjamín Carrasco</strong>
+                                <span class="table-subtext">34 años | Masculino | benjamin.carrasco@udp.cl</span>
+                            </td>
+                            <td>Curl de Bíceps</td>
+                            <td><span class="badge badge-amber">Pendiente</span></td>
+                            <td class="table-actions">
+                                <button class="btn-link text-emerald" onclick="verPatronPaciente('Benjamín Carrasco', 'Curl de Bíceps', 12)">Ver Patrón</button>
+                                <button class="btn-link text-indigo" onclick="consultarHistorialPaciente('18.234.567-1')">Historial</button>
+                                <button class="btn-link text-red" onclick="eliminarFila(this)">Eliminar</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+        </div>
+
+        <!-- =================================================================
+             VISTA 4: MANUAL DE USO (Sección 21 del Informe)
+             ================================================================= -->
+        <div id="tabManual" class="tab-view hidden">
+            <section class="card">
+                <div class="card-header">
+                    <h2 class="card-title text-emerald">Instrucciones de Operación del Producto (Guía de Usuario)</h2>
+                </div>
+                <div class="manual-steps">
+                    <div class="manual-step">
+                        <h3>Paso 1: Encendido e Instalación Física</h3>
+                        <p>Encienda los nodos sensores con las baterías LiPo. Ajuste los 4 nodos en sus respectivos segmentos corporales (Muslo, Tibia, Tronco y Cadera) utilizando las bandas elásticas de neopreno.</p>
+                    </div>
+                    <div class="manual-step">
+                        <h3>Paso 2: Calibración de Zeroing</h3>
+                        <p>Indique al paciente que permanezca inmóvil en posición anatómica neutra durante 2 segundos y presione el botón <span class="badge badge-online">Calibrar Sensores</span> para eliminar el sesgo estático de los sensores MPU6050.</p>
+                    </div>
+                    <div class="manual-step">
+                        <h3>Paso 3: Selección de Métrica y Umbral</h3>
+                        <p>Elija el eje biomecánico a evaluar (Profundidad, Valgo o Tronco) y ajuste el umbral de tolerancia angular con la barra deslizante según el criterio clínico.</p>
+                    </div>
+                    <div class="manual-step">
+                        <h3>Paso 4: Ejecución y Alerta Sonora</h3>
+                        <p>Presione "Activar Simulación" o inicie la recepción desde el servidor. El sistema emitirá una alerta sonora de 880 Hz (&lt; 200 ms) si la desviación postural supera el umbral configurado.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+    </main>
+
+    <!-- MODAL 1: AGREGAR NUEVO PACIENTE -->
+    <div id="modalPaciente" class="modal-overlay hidden">
+        <div class="modal-box">
+            <div class="card-header header-flex">
+                <h3 class="card-title text-emerald">Agregar Nuevo Paciente</h3>
+                <button class="modal-close" onclick="cerrarModalPaciente()">&times;</button>
+            </div>
+            <form id="formNuevoPaciente" onsubmit="guardarPaciente(event)">
+                <div class="form-group">
+                    <label for="nuevoNombre" class="form-label">Nombre Completo</label>
+                    <input type="text" id="nuevoNombre" class="form-control" required placeholder="Ej: Carlos Silva">
+                </div>
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label for="nuevoRut" class="form-label">RUT</label>
+                        <input type="text" id="nuevoRut" class="form-control" required placeholder="12.345.678-9">
+                    </div>
+                    <div class="form-group">
+                        <label for="nuevaEdad" class="form-label">Edad</label>
+                        <input type="number" id="nuevaEdad" class="form-control" min="1" max="120" required placeholder="30">
+                    </div>
+                </div>
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label for="nuevoSexo" class="form-label">Sexo</label>
+                        <select id="nuevoSexo" class="form-control">
+                            <option value="Masculino">Masculino</option>
+                            <option value="Femenino">Femenino</option>
+                            <option value="Otro">Otro</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="nuevoCorreo" class="form-label">Correo Electrónico</label>
+                        <input type="email" id="nuevoCorreo" class="form-control" required placeholder="carlos@udp.cl">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="cerrarModalPaciente()">Cancelar</button>
+                    <button type="submit" class="btn btn-emerald">Guardar Paciente</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL 2: GESTIÓN Y VISUALIZADOR DE PATRÓN BIOMECÁNICO -->
+    <div id="modalPatron" class="modal-overlay hidden">
+        <div class="modal-box modal-lg">
+            <div class="card-header header-flex">
+                <div>
+                    <h3 id="patronModalTitle" class="card-title text-emerald">Patrón Biomecánico Grabado</h3>
+                    <p id="patronModalSub" class="card-subtitle">Curva estándar de referencia registrada en PostgreSQL</p>
+                </div>
+                <button class="modal-close" onclick="cerrarModalPatron()">&times;</button>
+            </div>
+
+            <div class="chart-wrapper-modal">
+                <canvas id="patronBaseChart"></canvas>
+            </div>
+
+            <div class="form-row-2">
+                <div class="form-group">
+                    <label for="patronTolInput" class="form-label">Holgura de Tolerancia Angular (&plusmn;&deg;)</label>
+                    <input type="number" id="patronTolInput" class="form-control" value="10" min="5" max="25">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Frecuencia de Muestreo Patrón</label>
+                    <input type="text" class="form-control" disabled value="100 Hz (Datagramas UDP)">
+                </div>
+            </div>
+
+            <div class="modal-footer footer-between">
+                <button class="btn btn-indigo btn-sm" onclick="solicitarRegrabacionPatron()">
+                    Re-grabar Repetición Patrón
+                </button>
+                <button class="btn btn-emerald btn-sm" onclick="guardarHolguraPatron()">
+                    Guardar Parámetros en BBDD
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 3: FICHA CLÍNICA DE SESIÓN PARA IMPRIMIR / PDF -->
+    <div id="modalReporte" class="modal-overlay hidden">
+        <div class="modal-box modal-report">
+            <div class="report-header">
+                <div>
+                    <h2>Informe Clínico de Evaluación Biomecánica</h2>
+                    <p>Proyecto IoT TICs I - Universidad Diego Portales</p>
+                </div>
+                <div class="report-meta">
+                    <p><strong>Fecha:</strong> 30 de Octubre de 2026</p>
+                    <p><strong>ID Sesión:</strong> #UDP-2026-0892</p>
+                </div>
+            </div>
+
+            <div class="report-patient-grid">
+                <div><span>PACIENTE</span><strong>Juan Fuentes</strong></div>
+                <div><span>RUT</span><strong>19.876.543-2</strong></div>
+                <div><span>EJERCICIO</span><strong>Sentadilla Libre</strong></div>
+                <div><span>EVALUADOR</span><strong>Nicolás Leal (Kinesiólogo)</strong></div>
+            </div>
+
+            <div class="report-section">
+                <h3>Resumen Cuantitativo de la Sesión</h3>
+                <table class="report-table">
+                    <thead>
+                        <tr>
+                            <th>Repetición</th>
+                            <th>Duración (TUT)</th>
+                            <th>Desviación Máxima</th>
+                            <th>Evaluación Biomecánica</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Repetición 1</td><td>2.5 s</td><td>3.2°</td><td class="report-ok">Técnica Correcta</td></tr>
+                        <tr><td>Repetición 2</td><td>2.8 s</td><td>4.1°</td><td class="report-ok">Técnica Correcta</td></tr>
+                        <tr><td>Repetición 3</td><td>3.4 s</td><td>6.8°</td><td class="report-ok">Técnica Correcta</td></tr>
+                        <tr><td>Repetición 4</td><td>4.2 s</td><td>14.8°</td><td class="report-fail">Falla Biomecánica (Valgo Excesivo)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="report-observation">
+                <p><strong>Observación del Sistema IoT:</strong> El sujeto presentó un incremento progresivo del tiempo por repetición (Índice de fatiga: +68%), desencadenando una falla en el plano frontal durante la 4ª repetición a los 4.2 segundos.</p>
+            </div>
+
+            <div class="modal-footer footer-between no-print">
+                <button class="btn btn-secondary" onclick="cerrarModalReporte()">Cerrar Ventana</button>
+                <button class="btn btn-emerald" onclick="window.print()">Imprimir / Guardar como PDF</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lógica de la aplicación y cliente WebSocket/REST -->
+    <script src="./js/script.js"></script>
+</body>
+</html>
