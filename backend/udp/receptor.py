@@ -14,7 +14,7 @@ class ReceptorESP32(asyncio.DatagramProtocol):
 
         try:
             # 2. Desempaquetado Little-Endian
-            datos = struct.unpack('"menor que"BIhhhhhh', data)
+            datos = struct.unpack('<BIhhhhhh', data)
 
             nodo_id = datos[0]
             tiempo_ms = datos[1]
